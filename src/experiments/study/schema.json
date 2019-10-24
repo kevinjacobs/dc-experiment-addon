@@ -1,0 +1,16 @@
+[
+  {
+    "namespace": "experiments.study",
+    "description": "Contains the Delegated Credentials test study logic",
+    "functions": [
+      {
+        "name": "runTest",
+        "type": "function",
+        "description": "Runs the Delegated Credentials study test",
+        "parameters": [
+        ],
+        "async": false
+      }
+    ]
+  }
+]

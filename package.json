@@ -1,0 +1,24 @@
+{
+	"name": "tls-delegated-creds-experiment",
+	"version": "1.0.1",
+	"description": "TLS Delegated Credentials Experiment",
+	"main": "background.js",
+	"scripts": {
+		"build": "web-ext build --overwrite-dest --source-dir src",
+		"lint": "eslint .",
+		"test": "eslint src test"
+	},
+	"keywords": [
+		"addon",
+		"firefox",
+		"mozilla"
+	],
+	"author": "Mozilla Developers",
+	"license": "MPL-2.0",
+	"dependencies": {
+		"web-ext": "^3.1.1"
+	},
+	"devDependencies": {
+		"eslint": "^4.19.1"
+	}
+}
