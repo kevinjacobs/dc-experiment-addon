@@ -127,7 +127,7 @@ function finishExperiment(result) {
 
   if (result.hasResult && recordResult(result)) {
     // Mark the experiment as completed.
-    //Services.prefs.setBoolPref("dc-experiment.hasRun", true);
+    Services.prefs.setBoolPref("dc-experiment.hasRun", true);
     return;
   }
 }
