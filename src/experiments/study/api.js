@@ -10,23 +10,27 @@ Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 const kDelegatedCredentialsHost = "kc2kdm.com";
 const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
+const kTelemetryCategory = "delegatedcredentials"; // Can't have an underscore :(
+const kBranchControl = "control";
+const kBranchTreatment = "treatment";
 
-
-const kResults = {
-  SUCCESS: 0,
-  TIMEOUT: 1,
-  SUCCESS_NO_DC: 2,
-  CERT_NO_DC: 3,
-  DNS_FAILURE: 4,
-  NET_FAILURE: 5,
-  INSUFFICIENT_SECURITY: 6,
-  INCORRECT_TLS_VERSION: 7
+const kTelemetryEvents = {
+  "experiment": {
+    methods: [ "connectDC", "connectNoDC" ],
+    objects: [ "success", "timedOut", "hsNotDelegated", "certNotDelegated", "dnsFailure", "networkFailure", "insufficientSecurity", "incorrectTLSVersion" ]
+  }
 };
 
-// We can test via control (DC client-disable) or treatment (DC client-enable) branches.
-const BRANCH_CONTROL = "control";
-const BRANCH_TREATMENT = "treatment";
-
+const kResults = {
+  SUCCESS: "success",
+  TIMEOUT: "timedOut",
+  SUCCESS_NO_DC: "hsNotDelegated",
+  CERT_NO_DC: "certificateNotDelegated",
+  DNS_FAILURE: "dnsFailure",
+  NET_FAILURE: "networkFailure",
+  INSUFFICIENT_SECURITY: "insufficientSecurity",
+  INCORRECT_TLS_VERSION: "incorrectTLSVersion"
+};
 
 /* Prefs handlers */
 const prefManager = {
@@ -55,19 +59,71 @@ const prefManager = {
   rememberBoolPref(name) {
     const kPrefPrefix = "dc-experiment.previous.";
     let curMode = Services.prefs.getBoolPref(name);
-    // eslint-disable-next-line no-console
-    // console.log("Saving current " + name + " pref: " + curMode);
     Services.prefs.setBoolPref(kPrefPrefix + name, curMode);
   },
 
   restoreBoolPref(name) {
     const kPrefPrefix = "dc-experiment.previous.";
     let prevMode = Services.prefs.getBoolPref(kPrefPrefix + name);
-    // eslint-disable-next-line no-console
-    // console.log("Restoring " + kPrefPrefix + name + ": " + prevMode);
     Services.prefs.setBoolPref(name, prevMode);
+    Services.prefs.clearUserPref("dc-experiment.previous." + kDelegatedCredentialsPref);
   },
 };
+
+function setResult(result, telemetryResult) {
+  result.telemetryResult = telemetryResult;
+  result.hasResult = true; // Report it and mark the experiment complete.
+}
+
+/* Record one of the following for telemetry:
+ * |success|: Connected successfully using a delegated credential.
+ * |handshakeNotDelegated|: Connected successfully, but did not negotiate using delegated credential.
+ * |certificateNotDelegated|: Connected successfully, but the certificate did not permit delegated credentials.     <======= TODO: How to interrogate the EE Cert?
+ * |timedOut|: Network timeout.
+ * |dnsFailure|: Failed to connect due to a DNS failure.
+ * |networkFailure|: Failed to connect due to a non-timeout, non-dns network error (connection reset, etc).
+ * |insufficientSecurity|: The delegated credential did not provide high enough security.
+ * |incorrectTLSVersion|: Connected successfully, but used TLS < 1.3. */
+function populateResult(channel, result) {
+  let secInfo = channel.securityInfo;
+  if (secInfo instanceof Ci.nsITransportSecurityInfo) {
+    secInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+    let isSecure = (secInfo.securityState & Ci.nsIWebProgressListener.STATE_IS_SECURE) == Ci.nsIWebProgressListener.STATE_IS_SECURE;
+
+    if (result.status >= 400 && result.status < 521) {
+      // HTTP Error codes indicating network error.
+      setResult(result, kResults.NET_FAILURE);
+      if(result.status == 408)
+        setResult(result, kResults.TIMEOUT); // Except this one.
+    }
+    else if (result.status == 200 && isSecure) {
+      if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3)
+        setResult(result, kResults.INCORRECT_TLS_VERSION);
+      else if (!secInfo.isDelegatedCredential)
+        setResult(result, kResults.SUCCESS_NO_DC);
+      else if (secInfo.isDelegatedCredential)
+        setResult(result, kResults.SUCCESS);
+    }
+    else {
+      const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE = 2153398270;
+      if (result.nsiReqError == MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE){
+        setResult(result, kResults.INSUFFICIENT_SECURITY); // DC key strength was too weak
+      }
+    }
+  }
+  else {
+    switch(result.nsiReqError) {
+    case Cr.NS_ERROR_UNKNOWN_HOST:
+      setResult(result, kResults.DNS_FAILURE);
+      break;
+    default:
+      // Default to NET_FAILURE as there are many potential causes.
+      setResult(result, kResults.NET_FAILURE);
+      break;
+    }
+  }
+  // The default is to leave hasResult unset and repeat the test.
+}
 
 /* Submit the result for telemetry, and return true if successful.
  * If the telemetry submission was unsuccessful OR the result itself
@@ -80,45 +136,8 @@ function recordResult(result) {
   }
   // eslint-disable-next-line no-console
   console.log(result); //TODO: Do the telemetry submission...
+  Services.telemetry.recordEvent(kTelemetryCategory, result.method, result.telemetryResult);
   return true;
-}
-
-/* Record one of the following for telemetry:
- * |success|: Connected successfully using a delegated credential.
- * |handshake_not_delegated|: Connected successfully, but did not negotiate using delegated credential.
- * |certificate_not_delegated|: Connected successfully, but the certificate did not permit delegated credentials.     <======= TODO: How to interrogate the EE Cert?
- * |timed_out|: Network timeout.
- * |dns_failure|: Failed to connect due to a DNS failure.
- * |network_failure|: Failed to connect due to a non-timeout, non-dns network error (connection reset, etc).
- * |insufficient_security|: The delegated credential did not provide high enough security.
- * |incorrect_tls_version|: Connected successfully, but used TLS < 1.3.
-*/
-function populateResult(channel, result) {
-  let secInfo = channel.securityInfo;
-  if (secInfo instanceof Ci.nsITransportSecurityInfo) {
-    secInfo.QueryInterface(Ci.nsITransportSecurityInfo);
-    let isSecure = (secInfo.securityState & Ci.nsIWebProgressListener.STATE_IS_SECURE) == Ci.nsIWebProgressListener.STATE_IS_SECURE;
-
-    if (result.status >= 400 && result.status <= 521) { // HTTP Error codes
-      result.telemetryResult = kResults.NET_FAILURE;
-    }
-    else if (isSecure) {
-      if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3) {
-        result.telemetryResult = kResults.INCORRECT_TLS_VERSION;
-      }
-      else if (!secInfo.isDelegatedCredential) {
-        result.telemetryResult = kResults.SUCCESS_NO_DC;
-      }
-      else if (secInfo.isDelegatedCredential) {
-        result.telemetryResult = kResults.SUCCESS;
-      }
-    }
-    else if (secInfo.isDelegatedCredential) {
-      result.telemetryResult = kResults.INSUFFICIENT_SECURITY;
-    }
-
-    result.hasResult = true;
-  }
 }
 
 function finishExperiment(result) {
@@ -128,13 +147,12 @@ function finishExperiment(result) {
   if (result.hasResult && recordResult(result)) {
     // Mark the experiment as completed.
     Services.prefs.setBoolPref("dc-experiment.hasRun", true);
-    return;
   }
 }
 
 function makeRequest(branch) {
   var result = {
-    "branch" : branch,
+    "method" : branch ==  kBranchControl ? "connectNoDC" : "connectDC",
     "hasResult" : false // True when we have something worth reporting
   };
 
@@ -143,7 +161,6 @@ function makeRequest(branch) {
   oReq.setRequestHeader("X-Firefox-Experiment", "Delegated Credentials Breakage #1; https://bugzilla.mozilla.org/show_bug.cgi?id=1582591");
   oReq.timeout = 30000;
   oReq.addEventListener("error", e => {
-    e.target.QueryInterface(Ci.nsIHttpChannel);
     let channel = e.target.channel;
     let nsireq = channel.QueryInterface(Ci.nsIRequest);
     result.nsiReqError = nsireq ? nsireq.status : Cr.NS_ERROR_NOT_AVAILABLE;
@@ -151,19 +168,18 @@ function makeRequest(branch) {
     finishExperiment(result);
   });
   oReq.addEventListener("load", e => {
-    //e.target.QueryInterface(Ci.nsIHttpChannel);
     result.status = e.target.status;
-    result.nsiReqError = Cr.NS_OK;
+    let nsireq = e.target.channel.QueryInterface(Ci.nsIRequest);
+    result.nsiReqError = nsireq.status;
     populateResult(e.target.channel, result);
     finishExperiment(result);
   });
   oReq.addEventListener("timeout", () => {
-    result.telemetryResult = kResults.TIMEOUT;
-    result.hasResult = true;
+    setResult(result, kResults.TIMEOUT);
     finishExperiment(result);
   });
   oReq.addEventListener("abort", () => {
-    // !hasResult means we reattempt.
+    // Will retry
     finishExperiment(result);
   });
 
@@ -179,7 +195,7 @@ function getEnrollmentStatus() {
   }
 
   //return Math.random() >= 0.02;
-  return true; // TODO: Be more selective...
+  return true; // TODO: Be more selective... If they are not in the cohort, just set hasRun and exit.
 }
 
 // Returns true iff the test is to be performed with DC enabled.
@@ -202,15 +218,17 @@ const studyManager = {
     }
 
     prefManager.rememberBoolPref(kDelegatedCredentialsPref);
-    let testBranch = getDCTreatment() ? BRANCH_TREATMENT : BRANCH_CONTROL;
+    let testBranch = getDCTreatment() ? kBranchTreatment : kBranchControl;
 
-    if (testBranch === BRANCH_TREATMENT) {
+    if (testBranch === kBranchTreatment) {
+      // TODO: What if we crash in interim period? Need a way to revert this for good...
+      // setTimeout doesn't appear to be available
       prefManager.setBoolPref(kDelegatedCredentialsPref, true);
     } else {
       prefManager.setBoolPref(kDelegatedCredentialsPref, false);
     }
 
-    // Attempt the connection
+    Services.telemetry.registerEvents(kTelemetryCategory, kTelemetryEvents);
     makeRequest(testBranch);
   }
 };

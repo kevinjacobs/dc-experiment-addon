@@ -14,7 +14,8 @@
   },
 
   "permissions": [
-    "storage"
+    "storage",
+    "telemetry"
   ],
 
   "background": {

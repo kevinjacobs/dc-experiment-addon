@@ -4,7 +4,7 @@
       "description": "Test the result of connections using TLS Delegated Credentials"
     },
     "extensionDescription": {
-      "message": "Mozilla add-on that supports the roll-out of TLS Delegated Credentials "
+      "message": "Mozilla add-on that supports the testing of TLS Delegated Credentials "
     }
   }
   
