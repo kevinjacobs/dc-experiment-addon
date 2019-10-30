@@ -67,7 +67,7 @@ function setResult(result, telemetryResult) {
 /* Record one of the following for telemetry:
  * |success|: Connected successfully using a delegated credential.
  * |handshakeNotDelegated|: Connected successfully, but did not negotiate using delegated credential.
- * |certificateNotDelegated|: Connected successfully, but the certificate did not permit delegated credentials.     <======= TODO: How to interrogate the EE Cert?
+ * |certificateNotDelegated|: Connected successfully, but the certificate did not permit delegated credentials.
  * |timedOut|: Network timeout.
  * |dnsFailure|: Failed to connect due to a DNS failure.
  * |networkFailure|: Failed to connect due to a non-timeout, non-dns network error (connection reset, etc).
@@ -228,8 +228,6 @@ const studyManager = {
     let testBranch = getDCTreatment() ? kBranchTreatment : kBranchControl;
 
     if (testBranch === kBranchTreatment) {
-      // TODO: What if we crash in interim period? Need a way to revert this for good...
-      // setTimeout doesn't appear to be available
       prefManager.setBoolPref(kDelegatedCredentialsPref, true);
     } else {
       prefManager.setBoolPref(kDelegatedCredentialsPref, false);
