@@ -176,14 +176,19 @@ function makeRequest(branch) {
 
 // Returns true iff this session will perform the test.
 function getEnrollmentStatus() {
-  let val = prefManager.getBoolPref("dc-experiment.hasRun", false);
-  if (val != null && val === true) {
+  let hasRun = prefManager.getBoolPref("dc-experiment.hasRun", false);
+  if (hasRun != null && hasRun === true) {
     // The user has already run this experiment.
     return false;
   }
 
-  //return Math.random() >= 0.02;
-  return true; // TODO: Be more selective... If they are not in the cohort, just set hasRun and exit.
+  // Allow an override, else run the experment on 2% of the population.
+  let inCohort = prefManager.getBoolPref("dc-experiment.inCohort", false);
+  if (inCohort != null && inCohort === true) {
+    return true;
+  }
+
+  return Math.random() < 0.02;
 }
 
 // Returns true iff the test is to be performed with DC enabled.
