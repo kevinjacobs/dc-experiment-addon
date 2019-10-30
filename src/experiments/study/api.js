@@ -26,7 +26,7 @@ const kResults = {
   SUCCESS: "success",
   TIMEOUT: "timedOut",
   SUCCESS_NO_DC: "hsNotDelegated",
-  CERT_NO_DC: "certificateNotDelegated",
+  CERT_NO_DC: "certNotDelegated",
   DNS_FAILURE: "dnsFailure",
   NET_FAILURE: "networkFailure",
   INSUFFICIENT_SECURITY: "insufficientSecurity",
@@ -85,7 +85,7 @@ function populateResult(channel, result) {
       if(result.status == 408)
         setResult(result, kResults.TIMEOUT); // Except this one.
     }
-    else if (result.status == 200 && isSecure) {
+    else if (isSecure && (result.status == 0 || result.status == 200)) {
       if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3)
         setResult(result, kResults.INCORRECT_TLS_VERSION);
       else if (!secInfo.isDelegatedCredential)
@@ -95,8 +95,14 @@ function populateResult(channel, result) {
     }
     else {
       const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE = 2153398270;
+      const SSL_ERROR_DC_INVALID_KEY_USAGE = 2153393992;
       if (result.nsiReqError == MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE){
-        setResult(result, kResults.INSUFFICIENT_SECURITY); // DC key strength was too weak
+        // DC key strength was too weak
+        setResult(result, kResults.INSUFFICIENT_SECURITY);
+      }
+      else if (result.nsiReqError == SSL_ERROR_DC_INVALID_KEY_USAGE){
+        // Certificate did not contain the DC extension
+        setResult(result, kResults.CERT_NO_DC);
       }
     }
   }
