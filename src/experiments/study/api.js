@@ -10,6 +10,7 @@ Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 const kDelegatedCredentialsHost = "kc2kdm.com";
 const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
+const kTempPrefPrefix = "dc-experiment.previous.";
 const kTelemetryCategory = "delegatedcredentials"; // Can't have an underscore :(
 const kBranchControl = "control";
 const kBranchTreatment = "treatment";
@@ -38,18 +39,8 @@ const prefManager = {
     return Services.prefs.prefHasUserValue(name);
   },
 
-  getPref(name, value) {
-    let type = Services.prefs.getPrefType(name);
-    switch (type) {
-    case Services.prefs.PREF_STRING:
-      return Services.prefs.getCharPref(name, value);
-    case Services.prefs.PREF_INT:
-      return Services.prefs.getIntPref(name, value);
-    case Services.prefs.PREF_BOOL:
-      return Services.prefs.getBoolPref(name, value);
-    default:
-      throw new Error("Unknown type");
-    }
+  getBoolPref(name, value) {
+    return Services.prefs.getBoolPref(name, value);
   },
 
   setBoolPref(name, value) {
@@ -57,16 +48,14 @@ const prefManager = {
   },
 
   rememberBoolPref(name) {
-    const kPrefPrefix = "dc-experiment.previous.";
     let curMode = Services.prefs.getBoolPref(name);
-    Services.prefs.setBoolPref(kPrefPrefix + name, curMode);
+    Services.prefs.setBoolPref(kTempPrefPrefix + name, curMode);
   },
 
   restoreBoolPref(name) {
-    const kPrefPrefix = "dc-experiment.previous.";
-    let prevMode = Services.prefs.getBoolPref(kPrefPrefix + name);
+    let prevMode = Services.prefs.getBoolPref(kTempPrefPrefix + name);
     Services.prefs.setBoolPref(name, prevMode);
-    Services.prefs.clearUserPref("dc-experiment.previous." + kDelegatedCredentialsPref);
+    Services.prefs.clearUserPref(kTempPrefPrefix + name);
   },
 };
 
@@ -135,7 +124,6 @@ function recordResult(result) {
     return false;
   }
   // eslint-disable-next-line no-console
-  console.log(result); //TODO: Do the telemetry submission...
   Services.telemetry.recordEvent(kTelemetryCategory, result.method, result.telemetryResult);
   return true;
 }
@@ -146,7 +134,7 @@ function finishExperiment(result) {
 
   if (result.hasResult && recordResult(result)) {
     // Mark the experiment as completed.
-    Services.prefs.setBoolPref("dc-experiment.hasRun", true);
+    prefManager.setBoolPref("dc-experiment.hasRun", true);
   }
 }
 
@@ -188,7 +176,7 @@ function makeRequest(branch) {
 
 // Returns true iff this session will perform the test.
 function getEnrollmentStatus() {
-  let val = Services.prefs.getBoolPref("dc-experiment.hasRun", false);
+  let val = prefManager.getBoolPref("dc-experiment.hasRun", false);
   if (val != null && val === true) {
     // The user has already run this experiment.
     return false;
@@ -206,11 +194,19 @@ function getDCTreatment() {
 const studyManager = {
   uninstall() {
     // TODO: How can we cleanup? https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/management is unsupported
-    Services.prefs.clearUserPref("dc-experiment.hasRun");
-    Services.prefs.clearUserPref("dc-experiment.previous." + kDelegatedCredentialsPref);
+    prefManager.clearUserPref("dc-experiment.hasRun");
+    prefManager.clearUserPref("dc-experiment.previous." + kDelegatedCredentialsPref);
   },
 
   runTest() {
+    // If the the addon stored a previous setting for "enabled Delegated Credentials" and it still exists,
+    // then the test didn't exit/cleanup proplerly. In this case, restore the setting and mark the test completed.
+    if (prefManager.prefHasUserValue(kTempPrefPrefix + kDelegatedCredentialsPref)) {
+      prefManager.restoreBoolPref(kDelegatedCredentialsPref);
+      prefManager.setBoolPref("dc-experiment.hasRun", true);
+      return;
+    }
+
     // If the user has already changed the default setting or they are not randomly selected, return early.
     if (prefManager.prefHasUserValue(kDelegatedCredentialsPref) ||
         getEnrollmentStatus() === false) {
