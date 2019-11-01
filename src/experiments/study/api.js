@@ -1,25 +1,42 @@
 "use strict";
 
 /* exported study */
-/* global Cc, Ci, Components, ExtensionAPI, Services  */
-
-let Cu = Components.utils;
-Cu.import("resource://gre/modules/ExtensionPreferencesManager.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+/* global Ci, Cu ExtensionAPI, Services, ChromeUtils  */
+ChromeUtils.import("resource://gre/modules/ExtensionPreferencesManager.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 
-const kDelegatedCredentialsHost = "kc2kdm.com";
-const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
-const kTempPrefPrefix = "dc-experiment.previous.";
-const kTelemetryCategory = "delegatedcredentials"; // Can't have an underscore :(
+// Test constants
 const kBranchControl = "control";
 const kBranchTreatment = "treatment";
+const kDelegatedCredentialsHost = "kc2kdm.com";
+const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
+
+// Prefs
+const kExperimentHasRun = "dc-experiment.hasRun";
+const kForceInCohort = "dc-experiment.inCohort";
+const kPreviousPrefPrefix = "dc-experiment.previous.";
+
+// Telemetry
+const kTelemetryCategory = "delegatedcredentials"; // Can't have an underscore :(
 
 const kTelemetryEvents = {
   "experiment": {
-    methods: [ "connectDC", "connectNoDC" ],
-    objects: [ "success", "timedOut", "hsNotDelegated", "certNotDelegated", "dnsFailure", "networkFailure", "insufficientSecurity", "incorrectTLSVersion" ]
-  }
+    methods: [
+      "connectDC",
+      "connectNoDC"
+    ],
+    objects: [
+      "success",
+      "timedOut",
+      "hsNotDelegated",
+      "certNotDelegated",
+      "dnsFailure",
+      "networkFailure",
+      "insufficientSecurity",
+      "incorrectTLSVersion",
+    ]
+  },
 };
 
 const kResults = {
@@ -30,7 +47,7 @@ const kResults = {
   DNS_FAILURE: "dnsFailure",
   NET_FAILURE: "networkFailure",
   INSUFFICIENT_SECURITY: "insufficientSecurity",
-  INCORRECT_TLS_VERSION: "incorrectTLSVersion"
+  INCORRECT_TLS_VERSION: "incorrectTLSVersion",
 };
 
 /* Prefs handlers */
@@ -49,13 +66,13 @@ const prefManager = {
 
   rememberBoolPref(name) {
     let curMode = Services.prefs.getBoolPref(name);
-    Services.prefs.setBoolPref(kTempPrefPrefix + name, curMode);
+    Services.prefs.setBoolPref(kPreviousPrefPrefix + name, curMode);
   },
 
   restoreBoolPref(name) {
-    let prevMode = Services.prefs.getBoolPref(kTempPrefPrefix + name);
+    let prevMode = Services.prefs.getBoolPref(kPreviousPrefPrefix + name);
     Services.prefs.setBoolPref(name, prevMode);
-    Services.prefs.clearUserPref(kTempPrefPrefix + name);
+    Services.prefs.clearUserPref(kPreviousPrefPrefix + name);
   },
 };
 
@@ -77,44 +94,46 @@ function populateResult(channel, result) {
   let secInfo = channel.securityInfo;
   if (secInfo instanceof Ci.nsITransportSecurityInfo) {
     secInfo.QueryInterface(Ci.nsITransportSecurityInfo);
-    let isSecure = (secInfo.securityState & Ci.nsIWebProgressListener.STATE_IS_SECURE) == Ci.nsIWebProgressListener.STATE_IS_SECURE;
+    let isSecure =
+      (secInfo.securityState & Ci.nsIWebProgressListener.STATE_IS_SECURE) ==
+     Ci.nsIWebProgressListener.STATE_IS_SECURE;
 
     if (result.status >= 400 && result.status < 521) {
       // HTTP Error codes indicating network error.
       setResult(result, kResults.NET_FAILURE);
-      if(result.status == 408)
+      if (result.status == 408) {
         setResult(result, kResults.TIMEOUT); // Except this one.
-    }
-    else if (isSecure && (result.status == 0 || result.status == 200)) {
-      if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3)
+      }
+    } else if (isSecure && (result.status == 0 || result.status == 200)) {
+      if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3) {
         setResult(result, kResults.INCORRECT_TLS_VERSION);
-      else if (!secInfo.isDelegatedCredential)
+      }
+      else if (!secInfo.isDelegatedCredential) {
         setResult(result, kResults.SUCCESS_NO_DC);
-      else if (secInfo.isDelegatedCredential)
+      }
+      else if (secInfo.isDelegatedCredential) {
         setResult(result, kResults.SUCCESS);
-    }
-    else {
+      }
+    } else {
       const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE = 2153398270;
       const SSL_ERROR_DC_INVALID_KEY_USAGE = 2153393992;
-      if (result.nsiReqError == MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE){
+      if (result.nsiReqError == MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE) {
         // DC key strength was too weak
         setResult(result, kResults.INSUFFICIENT_SECURITY);
-      }
-      else if (result.nsiReqError == SSL_ERROR_DC_INVALID_KEY_USAGE){
+      } else if (result.nsiReqError == SSL_ERROR_DC_INVALID_KEY_USAGE) {
         // Certificate did not contain the DC extension
         setResult(result, kResults.CERT_NO_DC);
       }
     }
-  }
-  else {
+  } else {
     switch(result.nsiReqError) {
-    case Cr.NS_ERROR_UNKNOWN_HOST:
-      setResult(result, kResults.DNS_FAILURE);
-      break;
-    default:
-      // Default to NET_FAILURE as there are many potential causes.
-      setResult(result, kResults.NET_FAILURE);
-      break;
+      case Cr.NS_ERROR_UNKNOWN_HOST:
+        setResult(result, kResults.DNS_FAILURE);
+        break;
+      default:
+        // Default to NET_FAILURE as there are many potential causes.
+        setResult(result, kResults.NET_FAILURE);
+        break;
     }
   }
   // The default is to leave hasResult unset and repeat the test.
@@ -130,7 +149,10 @@ function recordResult(result) {
     return false;
   }
   // eslint-disable-next-line no-console
-  Services.telemetry.recordEvent(kTelemetryCategory, result.method, result.telemetryResult);
+  Services.telemetry.recordEvent(
+    kTelemetryCategory,
+    result.method,
+    result.telemetryResult);
   return true;
 }
 
@@ -140,7 +162,7 @@ function finishExperiment(result) {
 
   if (result.hasResult && recordResult(result)) {
     // Mark the experiment as completed.
-    prefManager.setBoolPref("dc-experiment.hasRun", true);
+    prefManager.setBoolPref(kExperimentHasRun, true);
   }
 }
 
@@ -152,7 +174,9 @@ function makeRequest(branch) {
 
   var oReq = new XMLHttpRequest();
   oReq.open("HEAD", "https://" + kDelegatedCredentialsHost);
-  oReq.setRequestHeader("X-Firefox-Experiment", "Delegated Credentials Breakage #1; https://bugzilla.mozilla.org/show_bug.cgi?id=1582591");
+  oReq.setRequestHeader(
+    "X-Firefox-Experiment",
+    "Delegated Credentials Breakage #1; https://bugzilla.mozilla.org/show_bug.cgi?id=1582591");
   oReq.timeout = 30000;
   oReq.addEventListener("error", e => {
     let channel = e.target.channel;
@@ -182,14 +206,14 @@ function makeRequest(branch) {
 
 // Returns true iff this session will perform the test.
 function getEnrollmentStatus() {
-  let hasRun = prefManager.getBoolPref("dc-experiment.hasRun", false);
+  let hasRun = prefManager.getBoolPref(kExperimentHasRun, false);
   if (hasRun != null && hasRun === true) {
     // The user has already run this experiment.
     return false;
   }
 
   // Allow an override, else run the experment on 2% of the population.
-  let inCohort = prefManager.getBoolPref("dc-experiment.inCohort", false);
+  let inCohort = prefManager.getBoolPref(kForceInCohort, false);
   if (inCohort != null && inCohort === true) {
     return true;
   }
@@ -205,22 +229,23 @@ function getDCTreatment() {
 const studyManager = {
   uninstall() {
     // TODO: How can we cleanup? https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/management is unsupported
-    prefManager.clearUserPref("dc-experiment.hasRun");
-    prefManager.clearUserPref("dc-experiment.previous." + kDelegatedCredentialsPref);
+    prefManager.clearUserPref(kExperimentHasRun);
+    prefManager.clearUserPref(kPreviousPrefPrefix + kDelegatedCredentialsPref);
   },
 
   runTest() {
     // If the the addon stored a previous setting for "enabled Delegated Credentials" and it still exists,
     // then the test didn't exit/cleanup proplerly. In this case, restore the setting and mark the test completed.
-    if (prefManager.prefHasUserValue(kTempPrefPrefix + kDelegatedCredentialsPref)) {
+    if (prefManager.prefHasUserValue(kPreviousPrefPrefix + kDelegatedCredentialsPref)) {
       prefManager.restoreBoolPref(kDelegatedCredentialsPref);
-      prefManager.setBoolPref("dc-experiment.hasRun", true);
+      prefManager.setBoolPref(kExperimentHasRun, true);
       return;
     }
 
     // If the user has already changed the default setting or they are not randomly selected, return early.
     if (prefManager.prefHasUserValue(kDelegatedCredentialsPref) ||
         getEnrollmentStatus() === false) {
+      prefManager.setBoolPref(kExperimentHasRun, true);
       return;
     }
 
@@ -235,21 +260,20 @@ const studyManager = {
 
     Services.telemetry.registerEvents(kTelemetryCategory, kTelemetryEvents);
     makeRequest(testBranch);
-  }
+  },
 };
-
 
 var study = class study extends ExtensionAPI {
   getAPI() {
     return {
       experiments: {
         study: {
+          uninstall() {
+            studyManager.uninstall();
+          },
           runTest() {
             studyManager.runTest();
           },
-          uninstall() {
-            studyManager.uninstall();
-          }
         },
       },
     };
