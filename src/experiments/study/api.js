@@ -1,3 +1,6 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
 /* exported study */
@@ -96,7 +99,7 @@ function populateResult(channel, result) {
     secInfo.QueryInterface(Ci.nsITransportSecurityInfo);
     let isSecure =
       (secInfo.securityState & Ci.nsIWebProgressListener.STATE_IS_SECURE) ==
-     Ci.nsIWebProgressListener.STATE_IS_SECURE;
+    Ci.nsIWebProgressListener.STATE_IS_SECURE;
 
     if (result.status >= 400 && result.status < 521) {
       // HTTP Error codes indicating network error.
@@ -148,7 +151,6 @@ function recordResult(result) {
     // mark the experiment as not-run, allowing it run again.
     return false;
   }
-  // eslint-disable-next-line no-console
   Services.telemetry.recordEvent(
     kTelemetryCategory,
     result.method,
@@ -228,9 +230,9 @@ function getDCTreatment() {
 
 const studyManager = {
   uninstall() {
-    // TODO: How can we cleanup? https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/management is unsupported
-    prefManager.clearUserPref(kExperimentHasRun);
-    prefManager.clearUserPref(kPreviousPrefPrefix + kDelegatedCredentialsPref);
+    // Cleanup our study prefs
+    Services.prefs.clearUserPref(kExperimentHasRun);
+    Services.prefs.clearUserPref(kPreviousPrefPrefix + kDelegatedCredentialsPref);
   },
 
   runTest() {
