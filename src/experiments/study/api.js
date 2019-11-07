@@ -15,7 +15,6 @@ const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
 
 // Prefs
 const kExperimentHasRun = "dc-experiment.hasRun";
-const kForceInCohort = "dc-experiment.inCohort";
 const kForceTreatment = "dc-experiment.branchTreatment";
 const kTargetHost = "dc-experiment.host";
 const kPreviousPrefPrefix = "dc-experiment.previous.";
@@ -214,7 +213,6 @@ function makeRequest(branch) {
   oReq.send();
 }
 
-// Returns true iff this session will perform the test.
 function getEnrollmentStatus() {
   let hasRun = prefManager.getBoolPref(kExperimentHasRun, false);
   if (hasRun != null && hasRun === true) {
@@ -222,13 +220,7 @@ function getEnrollmentStatus() {
     return false;
   }
 
-  // Allow an override, else run the experment on 2% of the population.
-  let inCohort = prefManager.getBoolPref(kForceInCohort, false);
-  if (inCohort != null && inCohort === true) {
-    return true;
-  }
-
-  return Math.random() < 0.02;
+  return true;
 }
 
 // Returns true iff the test is to be performed with DC enabled.

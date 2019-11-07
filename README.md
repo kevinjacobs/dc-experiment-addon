@@ -13,14 +13,11 @@ This is a WebExtension designed to test TLS Delegated Credentials in Firefox.
 
 You should see a new entry in the list of extensions titled "TLS Delegated Credentials Experiment".
 
-In about:telemetry, search for "delegated" to see the results (if any) under the "Keyed Scalars" section. Note there will only be a result listed if you were
-selected as part of the cohort (randomly by 2% chance). You can force this selection by creating and setting pref *dc-experiment.inCohort* to true.
-
-In either case, there will be a new pref, *dc-experiment.hasRun*, that the script checks for before executing itself.
+In about:telemetry, search for "delegated" to see the results (if any) under the "Keyed Scalars" section. Note there will only be a result listed if the experiment has not already been completed. This is indicated by the presence of a pref: *dc-experiment.hasRun*, that the script checks for before executing itself. Toggling this pref to false (or deleting it) will allow repeated invocations of the test.
 
 ## How to run in-tree
 
-As the experiment is planned for in-tree distribution, the preferred way to test would be to build your own Nightly, with the patch from <https://phabricator.services.mozilla.com/D51329> applied. This also makes persistance of the *dc-experiment.inCohort* pref easier to manage.
+As the experiment is planned for in-tree distribution, the preferred way to test would be to build your own Nightly, with the patch from <https://phabricator.services.mozilla.com/D51329> applied.
 
 With the patch applied, you can check that the study has run by again looking for *dc-experiment.hasRun*, and any telemetry logged in about:telemetry.
 
