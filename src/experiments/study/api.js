@@ -2,13 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
-
 /* exported study */
 /* global Ci, Cu ExtensionAPI, Services, ChromeUtils  */
 ChromeUtils.import("resource://gre/modules/ExtensionPreferencesManager.jsm");
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 Cu.importGlobalProperties(["XMLHttpRequest"]);
-
 // Test constants
 const kBranchControl = "control";
 const kBranchTreatment = "treatment";
@@ -18,6 +16,8 @@ const kDelegatedCredentialsPref = "security.tls.enable_delegated_credentials";
 // Prefs
 const kExperimentHasRun = "dc-experiment.hasRun";
 const kForceInCohort = "dc-experiment.inCohort";
+const kForceTreatment = "dc-experiment.branchTreatment";
+const kTargetHost = "dc-experiment.host";
 const kPreviousPrefPrefix = "dc-experiment.previous.";
 
 // Telemetry
@@ -38,7 +38,8 @@ const kTelemetryEvents = {
       "networkFailure",
       "insufficientSecurity",
       "incorrectTLSVersion",
-    ]
+    ],
+    record_on_release: true,
   },
 };
 
@@ -65,6 +66,9 @@ const prefManager = {
 
   setBoolPref(name, value) {
     Services.prefs.setBoolPref(name, value);
+  },
+  getStringPref(name, value) {
+    return Services.prefs.getStringPref(name, value);
   },
 
   rememberBoolPref(name) {
@@ -110,11 +114,9 @@ function populateResult(channel, result) {
     } else if (isSecure && (result.status == 0 || result.status == 200)) {
       if (secInfo.protocolVersion < secInfo.TLS_VERSION_1_3) {
         setResult(result, kResults.INCORRECT_TLS_VERSION);
-      }
-      else if (!secInfo.isDelegatedCredential) {
+     } else if (!secInfo.isDelegatedCredential) {
         setResult(result, kResults.SUCCESS_NO_DC);
-      }
-      else if (secInfo.isDelegatedCredential) {
+     } else if (secInfo.isDelegatedCredential) {
         setResult(result, kResults.SUCCESS);
       }
     } else {
@@ -154,7 +156,8 @@ function recordResult(result) {
   Services.telemetry.recordEvent(
     kTelemetryCategory,
     result.method,
-    result.telemetryResult);
+   result.telemetryResult
+ );
   return true;
 }
 
@@ -170,15 +173,20 @@ function finishExperiment(result) {
 
 function makeRequest(branch) {
   var result = {
-    "method" : branch ==  kBranchControl ? "connectNoDC" : "connectDC",
-    "hasResult" : false // True when we have something worth reporting
+   method: branch == kBranchControl ? "connectNoDC" : "connectDC",
+   hasResult: false, // True when we have something worth reporting
   };
 
   var oReq = new XMLHttpRequest();
-  oReq.open("HEAD", "https://" + kDelegatedCredentialsHost);
+ oReq.open(
+   "HEAD",
+   "https://" +
+     prefManager.getStringPref(kTargetHost, kDelegatedCredentialsHost)
+ );
   oReq.setRequestHeader(
     "X-Firefox-Experiment",
-    "Delegated Credentials Breakage #1; https://bugzilla.mozilla.org/show_bug.cgi?id=1582591");
+   "Delegated Credentials Breakage #1; https://bugzilla.mozilla.org/show_bug.cgi?id=1582591"
+ );
   oReq.timeout = 30000;
   oReq.addEventListener("error", e => {
     let channel = e.target.channel;
@@ -232,28 +240,37 @@ const studyManager = {
   uninstall() {
     // Cleanup our study prefs
     Services.prefs.clearUserPref(kExperimentHasRun);
-    Services.prefs.clearUserPref(kPreviousPrefPrefix + kDelegatedCredentialsPref);
+   Services.prefs.clearUserPref(
+     kPreviousPrefPrefix + kDelegatedCredentialsPref
+   );
   },
-
   runTest() {
     // If the the addon stored a previous setting for "enabled Delegated Credentials" and it still exists,
     // then the test didn't exit/cleanup proplerly. In this case, restore the setting and mark the test completed.
-    if (prefManager.prefHasUserValue(kPreviousPrefPrefix + kDelegatedCredentialsPref)) {
+   if (
+     prefManager.prefHasUserValue(
+       kPreviousPrefPrefix + kDelegatedCredentialsPref
+     )
+   ) {
       prefManager.restoreBoolPref(kDelegatedCredentialsPref);
       prefManager.setBoolPref(kExperimentHasRun, true);
       return;
     }
 
     // If the user has already changed the default setting or they are not randomly selected, return early.
-    if (prefManager.prefHasUserValue(kDelegatedCredentialsPref) ||
-        getEnrollmentStatus() === false) {
+   if (
+     prefManager.prefHasUserValue(kDelegatedCredentialsPref) ||
+     getEnrollmentStatus() === false
+   ) {
       prefManager.setBoolPref(kExperimentHasRun, true);
       return;
     }
 
     prefManager.rememberBoolPref(kDelegatedCredentialsPref);
-    let testBranch = getDCTreatment() ? kBranchTreatment : kBranchControl;
-
+    // Get the value of dc-experiment.branch if it exists, otherwise choose randomly.
+   let testBranch = prefManager.getBoolPref(kForceTreatment, getDCTreatment())
+     ? kBranchTreatment
+     : kBranchControl;
     if (testBranch === kBranchTreatment) {
       prefManager.setBoolPref(kDelegatedCredentialsPref, true);
     } else {
