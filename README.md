@@ -34,9 +34,9 @@ For positive test cases, we're then looking for two possible entries: *delegated
 success|The connection was successful AND used a DC.|Treatment|This should be generated ~50% of the time
 hsNotDelegated|The connetion was successful but did not use a DC (this is a success condition for Control branch, but a failure condition for Treatement).|Control, Treatment|This should be generated ~50% of the time if inCohort is set (and from Control only).|
 timedOut|The connection timed out.|Control, Treatment|Update kDelegatedCredentialsHost to httpstat.us/408 (or any host that will resolve but timeout) and re-run the study.|
-certNotDelegated|The server provided a DC, but the end-entity cert did not contain the Delegation Usage extension.|Treatment|This can be tested with a special xpcshell test sever. It has already been validated, but we can provide more detailed instructions if needed.|
+certNotDelegated|The server provided a DC, but the end-entity cert did not contain the Delegation Usage extension.|Treatment|<https://docs.google.com/document/d/1pPJf1Hr0FXn-9aoTQYQoguMTE-vGuHo5WVzALB6b6jM>|
 dnsFailure|Name resolution failed.|Control, Treatment|Set kDelegatedCredentialsHost to some non-existant host (e.g. a GUID) and re-run the study.|
-insufficientSecurity|DC was used in the handshake, but the key did not provide sufficient security.|Treatment|This can be tested with a special xpcshell test sever. It has already been validated, but we can provide more detailed instructions if needed.|
+insufficientSecurity|DC was used in the handshake, but the key did not provide sufficient security.|Treatment|<https://docs.google.com/document/d/1pPJf1Hr0FXn-9aoTQYQoguMTE-vGuHo5WVzALB6b6jM>|
 incorrectTLSVersion|DC was used in the handshake, but the key did not provide sufficient security|Control, Treatment|Set kDelegatedCredentialsHost to tls-v1-2.badssl.com:1012 and re-run the study.|
 networkFailure|Any other unclassified failure.|Control, Treatment|Various|
 
